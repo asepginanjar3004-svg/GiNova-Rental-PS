@@ -1,0 +1,19 @@
+<svg width="120" height="40" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#7117ea;stop-opacity:1"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <path d="M140 100 Q140 70 200 70 Q260 70 260 100 L280 150 Q280 170 240 170 L220 150 L180 150 L160 170 Q120 170 120 150 Z" fill="none" stroke="url(#grad1)" stroke-width="8" filter="url(#glow)"/>
+  <path d="M185 105 L210 160 L245 80" fill="none" stroke="#00f2ff" stroke-width="10" stroke-linecap="round" filter="url(#glow)"/>
+  <text x="200" y="220" font-family="Arial,sans-serif" font-weight="bold" font-size="42" fill="url(#grad1)" text-anchor="middle" style="letter-spacing:2px">GINOVA</text>
+  <text x="200" y="250" font-family="Verdana" font-size="12" fill="#ffffff" text-anchor="middle" style="letter-spacing:4px">PLAYSTATION RENTAL</text>
+  <line x1="130" y1="265" x2="175" y2="265" stroke="#4facfe" stroke-width="2"/>
+  <text x="200" y="270" font-family="Arial" font-size="10" fill="#4facfe" text-anchor="middle">RENTAL PS</text>
+  <line x1="225" y1="265" x2="270" y2="265" stroke="#4facfe" stroke-width="2"/>
+</svg>

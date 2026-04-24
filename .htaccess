@@ -1,0 +1,34 @@
+# GINOVA - Security Configuration
+# Prevent directory listing
+Options -Indexes
+
+# Protect sensitive files
+<FilesMatch "^(config\.php|ginova_db\.sql|\.env|\.git)">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Disable server signature
+ServerSignature Off
+
+# Protect SQL files
+<FilesMatch "\.sql$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Enable rewrite engine
+RewriteEngine On
+
+# Redirect HTTP to HTTPS (uncomment when SSL is enabled)
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
