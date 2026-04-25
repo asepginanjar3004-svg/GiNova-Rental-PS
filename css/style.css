@@ -20,8 +20,36 @@
 
 body {
   background-color: var(--gn-bg);
+  background-image: radial-gradient(circle at top left, rgba(25,135,84,0.14), transparent 28%), radial-gradient(circle at bottom right, rgba(13,110,253,0.08), transparent 30%);
+  min-height: 100vh;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   color: var(--gn-text-dark);
+}
+
+.dashboard-hero {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  border-radius: 28px;
+  border: 1px solid rgba(25, 135, 84, 0.1);
+  box-shadow: 0 22px 60px rgba(16, 97, 63, 0.08);
+}
+
+.hero-card {
+  background: transparent;
+}
+
+.hero-title {
+  font-size: clamp(2rem, 2.5vw, 2.6rem);
+  font-weight: 700;
+}
+
+.hero-subtitle {
+  max-width: 660px;
+  line-height: 1.7;
+}
+
+.hero-actions .btn {
+  min-width: 160px;
 }
 
 /* Navbar Custom */
@@ -41,33 +69,40 @@ body {
 
 /* Cards */
 .gn-card {
-  border: none;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-  transition: all 0.3s ease;
-  background: var(--gn-card-bg);
+  border: 1px solid rgba(25, 135, 84, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(22, 83, 47, 0.08);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
 }
 
 .gn-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+  transform: translateY(-6px);
+  box-shadow: 0 28px 80px rgba(22, 83, 47, 0.12);
 }
 
 .gn-card-header {
   background: transparent;
-  border-bottom: 1px solid rgba(25, 135, 84, 0.1);
-  padding: 1.25rem 1.5rem;
-  font-weight: 600;
+  border-bottom: 1px solid rgba(25, 135, 84, 0.12);
+  padding: 1.4rem 1.5rem;
+  font-weight: 700;
 }
 
 /* Console Cards */
 .console-card {
-  border-radius: 16px;
-  border: 2px solid transparent;
-  transition: all 0.3s ease;
+  border-radius: 22px;
+  border: 1px solid rgba(25, 135, 84, 0.12);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
   position: relative;
   overflow: hidden;
+  min-height: 280px;
+  background-clip: padding-box;
+}
+
+.console-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 18px 40px rgba(15, 95, 51, 0.12);
 }
 
 .console-card::before {
@@ -82,17 +117,30 @@ body {
 }
 
 .console-card:hover::before {
-  width: 6px;
+  width: 8px;
 }
 
 .console-card.available {
-  border-color: var(--gn-available);
-  background: linear-gradient(135deg, #ffffff 0%, #e8f5e9 100%);
+  border-color: rgba(25, 135, 84, 0.25);
+  background: linear-gradient(135deg, #fbfff9 0%, #eaf8ed 100%);
 }
 
 .console-card.busy {
-  border-color: var(--gn-busy);
-  background: linear-gradient(135deg, #ffffff 0%, #fff8e1 100%);
+  border-color: rgba(255, 193, 7, 0.25);
+  background: linear-gradient(135deg, #fffdf5 0%, #fff6e7 100%);
+}
+
+.customer-name-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(25, 135, 84, 0.08);
+  color: var(--gn-primary-dark);
+  border-radius: 12px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.8rem;
 }
 
 .console-card .status-badge {
@@ -243,32 +291,42 @@ body {
 }
 
 .gn-table tbody td {
-  padding: 14px 16px;
-  border-bottom: 1px solid #e9ecef;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(25, 135, 84, 0.08);
   vertical-align: middle;
 }
 
 .gn-table tbody tr:hover {
-  background: var(--gn-primary-light);
+  background: rgba(25, 135, 84, 0.06);
+}
+
+.gn-table thead th {
+  border-bottom: 2px solid rgba(25, 135, 84, 0.14);
+}
+
+.gn-table {
+  border-radius: 20px;
+  overflow: hidden;
 }
 
 /* Stats Cards */
 .stat-card {
-  border-radius: 16px;
-  padding: 24px;
+  border-radius: 24px;
+  padding: 26px 24px;
   color: white;
   position: relative;
   overflow: hidden;
+  min-height: 160px;
 }
 
 .stat-card::after {
   content: '';
   position: absolute;
-  top: -20px;
-  right: -20px;
-  width: 100px;
-  height: 100px;
-  background: rgba(255, 255, 255, 0.1);
+  top: -30px;
+  right: -30px;
+  width: 140px;
+  height: 140px;
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 50%;
 }
 
@@ -290,9 +348,9 @@ body {
 
 /* Modal Custom */
 .modal-gn .modal-content {
-  border-radius: 20px;
+  border-radius: 24px;
   border: none;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 30px 80px rgba(15, 95, 51, 0.18);
 }
 
 .modal-gn .modal-header {

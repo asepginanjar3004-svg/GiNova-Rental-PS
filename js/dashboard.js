@@ -10,19 +10,59 @@
  * 5. Struk Detail: Tampilkan jumlah & nama item F&B di bill pembayaran
  */
 
-/**
- * State untuk melacak alarm yang sudah dipicu per transaksi.
- * Key: transactionId, Value: { last5min: timestamp|null, last1min: timestamp|null }
- * @type {Map<string, Object>}
- */
 let alarmState = new Map();
+
+// ============================================
+// STATISTICS UPDATE
+// ============================================
+
+/**
+ * Update statistik dashboard (total unit, sesi aktif, tersedia, omzet hari ini)
+ */
+function updateStats() {
+  const consoles = db.get(DB_KEYS.CONSOLES);
+  const transactions = getActiveTransactions();
+  const today = utils.getToday();
+  
+  // Total Unit PS
+  document.getElementById('statTotalConsoles').textContent = consoles.length;
+  
+  // Sesi Aktif
+  document.getElementById('statActiveSessions').textContent = transactions.length;
+  
+  // Unit Tersedia
+  const availableCount = consoles.filter(c => c.status === 'available').length;
+  document.getElementById('statAvailableCount').textContent = availableCount;
+  
+  // Omzet Hari Ini
+  const todayTransactions = db.get(DB_KEYS.TRANSACTIONS).filter(tx => {
+    if (!tx.paid_at) return false;
+    const paidDate = tx.paid_at.split('T')[0];
+    return paidDate === today;
+  });
+  
+  const todayRevenue = todayTransactions.reduce((sum, tx) => sum + (tx.total_price || 0), 0);
+  document.getElementById('statTodayRevenue').textContent = utils.formatRupiah(todayRevenue);
+}
+
+function refreshDashboard() {
+  renderConsoles();
+  renderActiveTransactions();
+  updateStats();
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   renderConsoles();
   renderActiveTransactions();
-  updateStats();
   loadPackagesToSelect();
   loadProductsToSelect();
+  
+  // Call updateStats after a short delay to ensure all elements are ready
+  setTimeout(() => {
+    if (typeof updateStats === 'function') {
+      updateStats();
+    }
+  }, 100);
   
   /**
    * Interval utama untuk update timer dan alarm setiap detik.
@@ -35,6 +75,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnAddFnB').addEventListener('click', addFnB);
   document.getElementById('btnCompletePayment').addEventListener('click', completePayment);
   document.getElementById('btnPrintReceipt').addEventListener('click', printReceipt);
+  
+  document.getElementById('manageFnBModal').addEventListener('hidden.bs.modal', refreshDashboard);
+  document.getElementById('successModal').addEventListener('hidden.bs.modal', refreshDashboard);
+  document.getElementById('paymentModal').addEventListener('hidden.bs.modal', refreshDashboard);
+  document.getElementById('qrisModal').addEventListener('hidden.bs.modal', refreshDashboard);
   
   document.getElementById('billingPackage').addEventListener('change', function() {
     const pkgId = this.value;
@@ -242,6 +287,7 @@ function renderConsoles() {
               <h6 class="mb-0 fw-bold">${console.name}</h6>
               <small class="text-muted">${console.type}</small>
             </div>
+          </div>
           ${customerBadge}
           ${isBusy && activeTransaction ? `
             <div class="timer-display mb-2" id="timer-${activeTransaction.id}">${formatTimer(activeTransaction)}</div>
@@ -251,7 +297,9 @@ function renderConsoles() {
               <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${activeTransaction.id}')"><i class="bi bi-stop-circle me-1"></i>Selesai</button>
             </div>
           ` : `<button class="btn btn-sm btn-gn-primary w-100 mt-2" onclick="openStartBillingModal('${console.id}')"><i class="bi bi-play-fill me-1"></i>Mulai</button>`}
-        </div>`;
+        </div>
+      </div>
+    </div>`;
   }).join('');
 }
 
@@ -268,6 +316,38 @@ function renderActiveTransactions() {
   }
   
   tbody.innerHTML = transactions.map(tx => {
+    // Cek apakah ini transaksi guest F&B only
+    if (tx.is_guest_fnb_only) {
+      const items = getTransactionItems(tx.id);
+      const activeItems = items.filter(item => item.status !== 'void');
+      const fnbTotal = activeItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      
+      let fnbDetailHtml = '';
+      if (activeItems.length > 0) {
+        fnbDetailHtml = activeItems.map(item => `<div class="small text-muted">${item.qty}x ${item.product_name}</div>`).join('');
+      }
+      
+      return `<tr class="table-info">
+        <td>
+          <span class="fw-semibold"><i class="bi bi-cup-hot me-1"></i>${tx.customer_name}</span><br>
+          <small class="text-muted">Tamu (F&B Only)</small>
+        </td>
+        <td><span class="badge bg-light text-dark border">Makanan</span></td>
+        <td><small>${utils.formatTime(tx.start_time)}</small></td>
+        <td><span class="badge bg-info">-</span></td>
+        <td>
+          ${activeItems.length > 0 ? `<span class="badge bg-info">${activeItems.length} item</span><div class="mt-1">${fnbDetailHtml}</div><br><small class="text-muted">${utils.formatRupiah(fnbTotal)}</small>` : '<span class="text-muted">-</span>'}
+        </td>
+        <td><span class="fw-bold text-success">${utils.formatRupiah(tx.total_price)}</span></td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-outline-success mb-1" onclick="openAddFnBModal('${tx.id}')"><i class="bi bi-plus-lg"></i> F&B</button>
+          <button class="btn btn-sm btn-outline-warning mb-1" onclick="openManageFnBModal('${tx.id}')"><i class="bi bi-list-ul"></i> Kelola</button>
+          <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${tx.id}')"><i class="bi bi-stop-circle"></i> Selesai</button>
+        </td>
+      </tr>`;
+    }
+    
+    // Transaksi PS normal
     const console = db.getById(DB_KEYS.CONSOLES, tx.console_id);
     const pkg = db.getById(DB_KEYS.PACKAGES, tx.package_id);
     const items = getTransactionItems(tx.id);
@@ -306,6 +386,9 @@ function renderActiveTransactions() {
 // TIMER LOGIC
 // ============================================
 function formatTimer(transaction) {
+  // Guest F&B only tidak punya timer
+  if (transaction.is_guest_fnb_only) return '-';
+  
   const start = new Date(transaction.start_time);
   const now = new Date();
   
@@ -330,6 +413,9 @@ function formatSeconds(totalSeconds) {
 function updateAllTimers() {
   const transactions = getActiveTransactions();
   transactions.forEach(tx => {
+    // Skip timer update untuk guest F&B only
+    if (tx.is_guest_fnb_only) return;
+    
     const timerEl = document.getElementById(`timer-${tx.id}`);
     const tableTimerEl = document.getElementById(`table-timer-${tx.id}`);
     const timeStr = formatTimer(tx);
@@ -466,6 +552,7 @@ function addFnB() {
   bootstrap.Modal.getInstance(document.getElementById('addFnBModal')).hide();
   renderConsoles();
   renderActiveTransactions();
+  updateStats();
   updateStats();
 }
 
@@ -665,6 +752,9 @@ function showSuccessNotification() {
 function closeSuccessModal() {
   const successModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('successModal'));
   successModal.hide();
+  
+  // Refresh dashboard setelah menutup modal
+  setTimeout(refreshDashboard, 300);
 }
 
 function simulateAutoTransfer(amount) {
@@ -818,6 +908,7 @@ function completePayment() {
     renderConsoles();
     renderActiveTransactions();
     updateStats();
+    updateStats();
     
     setTimeout(() => {
       if (confirm('Cetak nota?')) {
@@ -900,3 +991,197 @@ function calculateDuration(transaction) {
   if (h > 0) return `${h} jam`;
   return `${m} menit`;
 }
+
+/**
+ * Helper untuk menghitung durasi transaksi dalam format "Xj Ym".
+ * Digunakan untuk tampilan timer dan struk pembayaran.
+ * @param {Object} tx - Objek transaksi
+ * @returns {string} Durasi dalam format "Xj Ym"
+ */
+function calculateDuration(tx) {
+  const start = new Date(tx.start_time);
+  const end = tx.paid_at ? new Date(tx.paid_at) : new Date();
+  const diffMs = end - start;
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const h = Math.floor(diffMinutes / 60);
+  const m = diffMinutes % 60;
+  
+  if (h > 0 && m > 0) return `${h}j ${m}m`;
+  if (h > 0) return `${h}j`;
+  return `${m}m`;
+}
+
+// ============================================
+// GUEST F&B ONLY (TAMU TANPA PS)
+// ============================================
+let guestFnBItems = []; // Menyimpan item yang dipilih tamu
+
+function openGuestFnBModal() {
+  guestFnBItems = [];
+  document.getElementById('guestName').value = '';
+  document.getElementById('guestTotalInfo').style.display = 'none';
+  renderGuestFnBList();
+  const modal = new bootstrap.Modal(document.getElementById('guestFnBModal'));
+  modal.show();
+}
+
+function renderGuestFnBList() {
+  const products = db.get(DB_KEYS.PRODUCTS);
+  const container = document.getElementById('guestFnBList');
+  
+  if (products.length === 0) {
+    container.innerHTML = '<p class="text-muted text-center py-3">Tidak ada menu tersedia</p>';
+    return;
+  }
+  
+  container.innerHTML = products.map(product => `
+    <div class="card mb-2 border-light">
+      <div class="card-body p-2">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <h6 class="mb-1">${product.name}</h6>
+            <small class="text-muted">Stok: ${product.stock}</small>
+          </div>
+          <span class="fw-bold">${utils.formatRupiah(product.price)}</span>
+        </div>
+        <div class="input-group input-group-sm">
+          <button class="btn btn-outline-secondary" type="button" onclick="decreaseGuestQty('${product.id}')">
+            <i class="bi bi-dash"></i>
+          </button>
+          <input type="text" class="form-control text-center" id="guest-qty-${product.id}" value="0" readonly style="width: 50px;">
+          <button class="btn btn-outline-secondary" type="button" onclick="increaseGuestQty('${product.id}', ${product.stock})">
+            <i class="bi bi-plus"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function increaseGuestQty(productId, maxStock) {
+  const qtyInput = document.getElementById(`guest-qty-${productId}`);
+  let qty = parseInt(qtyInput.value) || 0;
+  
+  if (qty < maxStock) {
+    qty++;
+    qtyInput.value = qty;
+    updateGuestTotal();
+  }
+}
+
+function decreaseGuestQty(productId) {
+  const qtyInput = document.getElementById(`guest-qty-${productId}`);
+  let qty = parseInt(qtyInput.value) || 0;
+  
+  if (qty > 0) {
+    qty--;
+    qtyInput.value = qty;
+    updateGuestTotal();
+  }
+}
+
+function updateGuestTotal() {
+  const products = db.get(DB_KEYS.PRODUCTS);
+  let total = 0;
+  
+  products.forEach(product => {
+    const qtyEl = document.getElementById(`guest-qty-${product.id}`);
+    if (qtyEl) {
+      const qty = parseInt(qtyEl.value) || 0;
+      total += qty * product.price;
+    }
+  });
+  
+  if (total > 0) {
+    document.getElementById('guestTotalAmount').textContent = utils.formatRupiah(total);
+    document.getElementById('guestTotalInfo').style.display = 'block';
+  } else {
+    document.getElementById('guestTotalInfo').style.display = 'none';
+  }
+}
+
+function confirmGuestOrder() {
+  const guestName = document.getElementById('guestName').value.trim();
+  if (!guestName) {
+    alert('Silakan masukkan nama tamu!');
+    document.getElementById('guestName').focus();
+    return;
+  }
+  
+  const products = db.get(DB_KEYS.PRODUCTS);
+  let selectedItems = [];
+  let totalPrice = 0;
+  
+  products.forEach(product => {
+    const qtyEl = document.getElementById(`guest-qty-${product.id}`);
+    if (qtyEl) {
+      const qty = parseInt(qtyEl.value) || 0;
+      if (qty > 0) {
+        selectedItems.push({
+          id: product.id,
+          name: product.name,
+          price: product.price,
+          qty: qty,
+          subtotal: qty * product.price
+        });
+        totalPrice += qty * product.price;
+      }
+    }
+  });
+  
+  if (selectedItems.length === 0) {
+    alert('Silakan pilih minimal 1 item menu!');
+    return;
+  }
+  
+  // Simpan sebagai transaksi guest dengan console_id = "GUEST"
+  const startTime = new Date();
+  const guestTransaction = {
+    id: utils.generateId(),
+    console_id: 'GUEST',
+    package_id: null,
+    customer_name: guestName,
+    start_time: startTime.toISOString(),
+    end_time: null,
+    base_price: 0,
+    total_price: totalPrice,
+    status: 'unpaid',
+    paid_at: null,
+    created_by: Auth.getCurrentUser()?.id,
+    created_at: startTime.toISOString(),
+    is_guest_fnb_only: true // Flag untuk membedakan transaksi guest
+  };
+  
+  db.add(DB_KEYS.TRANSACTIONS, guestTransaction);
+  
+  // Simpan items F&B
+  selectedItems.forEach(item => {
+    const fnbItem = {
+      id: utils.generateId(),
+      transaction_id: guestTransaction.id,
+      product_id: item.id,
+      product_name: item.name,
+      price: item.price,
+      qty: item.qty,
+      status: 'active',
+      created_at: new Date().toISOString()
+    };
+    db.add(DB_KEYS.TRANSACTION_ITEMS, fnbItem);
+    
+    // Kurangi stok
+    const product = db.getById(DB_KEYS.PRODUCTS, item.id);
+    if (product) {
+      db.update(DB_KEYS.PRODUCTS, item.id, { stock: product.stock - item.qty });
+    }
+  });
+  
+  const modal = bootstrap.Modal.getInstance(document.getElementById('guestFnBModal'));
+  modal.hide();
+  
+  renderConsoles();
+  renderActiveTransactions();
+  updateStats();
+  
+  alert(`Order tamu "${guestName}" berhasil dibuat!`);
+}
+

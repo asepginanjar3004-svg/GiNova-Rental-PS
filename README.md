@@ -26,34 +26,29 @@
 ## 🚀 Quick Start
 
 ### 1. Persyaratan Server
-- PHP >= 7.4 dengan ekstensi `mysqli`
-- MySQL / MariaDB
-- Web server (Apache/Nginx)
+- PHP >= 7.4 dengan ekstensi `mysqli` atau `pdo_mysql`
+- MySQL / MariaDB >= 5.7
+- Web server (Apache/Nginx/IIS)
 
 ### 2. Setup Database
 ```bash
-# Import struktur database
-mysql -u root -p < ginova_db.sql
-
-# Atau jalankan script batch (Windows)
-import_db.bat
+# Login ke phpMyAdmin atau MySQL client
+# Import file SQL yang sudah disediakan (hubungi developer untuk file database)
 ```
 
 ### 3. Konfigurasi
 Edit file `api/config.php`:
 ```php
-$DB_HOST = 'localhost';
-$DB_USER = 'ginova_user';
-$DB_PASS = 'password_anda';
-$DB_NAME = 'ginova_rental';
+define('DB_USER', 'username_database_anda');
+define('DB_PASS', 'password_database_anda');
+define('DB_NAME', 'nama_database_anda');
 ```
 
-### 4. Akses Aplikasi
-| URL | Peran | Login |
-|-----|-------|-------|
-| `index.html` | Login Page | admin/admin123 atau kasir/kasir123 |
-| `dashboard.html` | Kasir | Billing, F&B, Pembayaran |
-| `admin.html` | Admin | CRUD Unit, Paket, Produk, User, Laporan |
+### 4. Upload & Akses
+Upload semua file ke folder `public_html` hosting Anda, lalu akses:
+- Login: `index.html`
+- Dashboard Kasir: `dashboard.html`
+- Admin Panel: `admin.html`
 
 ---
 

@@ -9,9 +9,9 @@
  */
 
 define('DB_HOST', 'localhost');
-define('DB_USER', 'GiNova');
-define('DB_PASS', 'Cepot034');
-define('DB_NAME', 'ginova_rental_ps');
+define('DB_USER', 'ginova_user');  // GANTI DENGAN USERNAME DATABASE ANDA
+define('DB_PASS', 'password_anda'); // GANTI DENGAN PASSWORD DATABASE ANDA
+define('DB_NAME', 'ginova_rental_ps'); // GANTI DENGAN NAMA DATABASE ANDA
 define('DB_CHARSET', 'utf8');
 
 /**

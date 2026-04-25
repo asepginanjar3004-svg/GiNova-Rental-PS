@@ -3,16 +3,16 @@
  * Premium Edition - Offline Ready
  */
 
-const CACHE_NAME = 'ginova-ps-v1';
+const CACHE_NAME = 'ginova-ps-v3';
 const ASSETS = [
   './',
   './index.html',
   './dashboard.html',
   './admin.html',
   './css/style.css',
-  './js/app.js',
-  './js/auth.js',
-  './js/dashboard.js',
+  './js/app.js?v=3',
+  './js/auth.js?v=3',
+  './js/dashboard.js?v=3',
   './js/admin.js',
   './img/ginova-logo.svg',
   './qris.jpeg'
@@ -44,35 +44,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - prefer network, fallback to cache
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith(self.location.origin)) return;
 
-  // Skip external requests (CDN)
-  if (!event.request.url.includes(self.location.origin)) return;
+  const requestUrl = new URL(event.request.url);
+  const isDocument = event.request.destination === 'document';
+  const isStaticFile = ['script', 'style', 'image', 'font'].includes(event.request.destination)
+    || requestUrl.pathname.endsWith('.js')
+    || requestUrl.pathname.endsWith('.css')
+    || requestUrl.pathname.endsWith('.html')
+    || requestUrl.pathname.endsWith('.svg')
+    || requestUrl.pathname.endsWith('.json');
+
+  if (isDocument || isStaticFile) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || (isDocument ? caches.match('./index.html') : null)))
+    );
+    return;
+  }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-      return fetch(event.request).then((response) => {
-        // Cache new assets dynamically
-        if (response.status === 200 && response.type === 'basic') {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      }).catch(() => {
-        // Fallback for offline
-        if (event.request.destination === 'document') {
-          return caches.match('./index.html');
-        }
-      });
-    })
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
 });
 

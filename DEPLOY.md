@@ -93,10 +93,9 @@ Login ke cPanel hosting Anda:
 
 ```
 1. Buka phpMyAdmin di cPanel
-2. Pilih database ginova_rental_ps
-3. Klik tab Import
-4. Pilih file ginova_db.sql
-5. Klik Go / Import
+2. Buat database: ginova_rental_ps
+3. Import file ginova_db.sql (sudah tersedia)
+4. Buat user database dengan full privileges
 ```
 
 ### 3. Update `api/config.php`
