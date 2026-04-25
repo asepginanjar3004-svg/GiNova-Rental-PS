@@ -10,6 +10,11 @@
  * 5. Struk Detail: Tampilkan jumlah & nama item F&B di bill pembayaran
  */
 
+/**
+ * State untuk melacak alarm yang sudah dipicu per transaksi.
+ * Key: transactionId, Value: { last5min: timestamp|null, last1min: timestamp|null }
+ * @type {Map<string, Object>}
+ */
 let alarmState = new Map();
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,9 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPackagesToSelect();
   loadProductsToSelect();
   
+  /**
+   * Interval utama untuk update timer dan alarm setiap detik.
+   */
   setInterval(() => {
-    updateAllTimers();
-    checkAlarms();
+    updateTimer();
   }, 1000);
   
   document.getElementById('btnStartBilling').addEventListener('click', startBilling);
@@ -78,29 +85,67 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================
+// TIMER & ALARM ENTRY POINT
+// ============================================
+
+/**
+ * Entry point utama untuk update timer dan alarm.
+ * Dipanggil setiap detik oleh interval di DOMContentLoaded.
+ * Menggabungkan update visual timer dan pemeriksaan alarm.
+ */
+function updateTimer() {
+  updateAllTimers();
+  checkAlarms();
+}
+
+// ============================================
 // ALARM SYSTEM
 // ============================================
+
+/**
+ * Memeriksa dan memicu alarm untuk transaksi aktif.
+ * Alarm 5 menit berulang setiap 30 detik selama sisa waktu <= 5 menit.
+ * Alarm 1 menit berulang setiap 10 detik selama sisa waktu <= 1 menit.
+ * State alarm disimpan per transaksi dengan timestamp terakhir trigger.
+ */
 function checkAlarms() {
   const transactions = getActiveTransactions();
+  const now = Date.now();
+  
   transactions.forEach(tx => {
     if (!tx.end_time) return;
     const end = new Date(tx.end_time);
-    const now = new Date();
-    const remainingSeconds = Math.floor((end - now) / 1000);
-    const alarmKey5 = `${tx.id}_5min`;
-    const alarmKey1 = `${tx.id}_1min`;
+    const remainingSeconds = Math.floor((end - new Date()) / 1000);
     
-    if (remainingSeconds <= 300 && remainingSeconds > 290 && !alarmState.has(alarmKey5)) {
-      triggerAlarm(tx, 5, 'menit');
-      alarmState.set(alarmKey5, true);
+    // Ambil atau inisialisasi state alarm untuk transaksi ini
+    let state = alarmState.get(tx.id);
+    if (!state) {
+      state = { last5min: null, last1min: null };
+      alarmState.set(tx.id, state);
     }
-    if (remainingSeconds <= 60 && remainingSeconds > 50 && !alarmState.has(alarmKey1)) {
-      triggerAlarm(tx, 1, 'menit');
-      alarmState.set(alarmKey1, true);
-    }
+    
+    // Reset state jika waktu sudah habis atau transaksi selesai
     if (remainingSeconds <= 0) {
-      alarmState.delete(alarmKey5);
-      alarmState.delete(alarmKey1);
+      alarmState.delete(tx.id);
+      return;
+    }
+    
+    // Alarm 5 menit: berulang setiap 30 detik selama 0 < remaining <= 300
+    if (remainingSeconds <= 300 && remainingSeconds > 0) {
+      const sinceLast5min = state.last5min ? now - state.last5min : Infinity;
+      if (sinceLast5min >= 30000) { // 30 detik interval
+        triggerAlarm(tx, 5, 'menit');
+        state.last5min = now;
+      }
+    }
+    
+    // Alarm 1 menit: berulang setiap 10 detik selama 0 < remaining <= 60
+    if (remainingSeconds <= 60 && remainingSeconds > 0) {
+      const sinceLast1min = state.last1min ? now - state.last1min : Infinity;
+      if (sinceLast1min >= 10000) { // 10 detik interval
+        triggerAlarm(tx, 1, 'menit');
+        state.last1min = now;
+      }
     }
   });
 }
@@ -206,8 +251,7 @@ function renderConsoles() {
               <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${activeTransaction.id}')"><i class="bi bi-stop-circle me-1"></i>Selesai</button>
             </div>
           ` : `<button class="btn btn-sm btn-gn-primary w-100 mt-2" onclick="openStartBillingModal('${console.id}')"><i class="bi bi-play-fill me-1"></i>Mulai</button>`}
-        </div>
-    </div>`;
+        </div>`;
   }).join('');
 }
 
@@ -826,8 +870,33 @@ function calculateCurrentTotal(transaction) {
   return baseTotal + fnbTotal;
 }
 
-
+/**
+ * Menghitung durasi bermain dari transaksi dalam format string yang human-readable.
+ * Untuk paket berdurasi: hitung dari start_time sampai sekarang (atau end_time jika sudah lewat).
+ * Untuk reguler: hitung dari start_time sampai sekarang (atau paid_at jika sudah dibayar).
+ * @param {Object} transaction - Objek transaksi
+ * @returns {string} Durasi dalam format "X jam Y menit" atau "Y menit"
+ */
+function calculateDuration(transaction) {
+  const start = new Date(transaction.start_time);
   const now = new Date();
-  const diff = Math.floor((now - start) / (1000 * 60));
-  const h = Math.floor(diff / 60);
-  const m = diff %
+  
+  // Gunakan waktu selesai aktual jika sudah dibayar, atau end_time jika paket habis
+  let end = now;
+  if (transaction.paid_at) {
+    end = new Date(transaction.paid_at);
+  } else if (transaction.end_time && new Date(transaction.end_time) < now) {
+    end = new Date(transaction.end_time);
+  }
+  
+  const diffMs = end - start;
+  if (diffMs < 0) return '0 menit';
+  
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const h = Math.floor(diffMinutes / 60);
+  const m = diffMinutes % 60;
+  
+  if (h > 0 && m > 0) return `${h} jam ${m} menit`;
+  if (h > 0) return `${h} jam`;
+  return `${m} menit`;
+}
