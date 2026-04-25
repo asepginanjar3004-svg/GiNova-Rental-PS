@@ -38,6 +38,8 @@ function showSection(sectionName) {
     renderAdminDashboard();
   } else if (sectionName === 'reports') {
     generateReport();
+  } else if (sectionName === 'void-audit') {
+    renderVoidAudit();
   }
 }
 
@@ -527,6 +529,81 @@ function deleteUser(id) {
     renderUsersTable();
     renderAdminDashboard();
   }
+}
+
+// ============================================
+// VOID AUDIT (SUPER ADMIN)
+// ============================================
+
+/**
+ * Mengambil semua item F&B yang statusnya 'void' dari TRANSACTION_ITEMS.
+ * Mengembalikan array yang sudah diurutkan berdasarkan waktu pembatalan terbaru.
+ * @returns {Array} Daftar item void dengan metadata transaksi & user.
+ */
+function getVoidItems() {
+  const items = db.get(DB_KEYS.TRANSACTION_ITEMS);
+  const voidItems = items.filter(item => item.status === 'void');
+  
+  // Enrich dengan data transaksi dan user untuk tampilan audit
+  return voidItems.map(item => {
+    const tx = db.getById(DB_KEYS.TRANSACTIONS, item.transaction_id);
+    const console = tx ? db.getById(DB_KEYS.CONSOLES, tx.console_id) : null;
+    const voidedBy = item.voided_by ? db.getById(DB_KEYS.USERS, item.voided_by) : null;
+    
+    return {
+      ...item,
+      console_name: console ? console.name : '-',
+      transaction_start: tx ? tx.start_time : null,
+      voided_by_name: voidedBy ? voidedBy.name : (item.voided_by || 'Sistem')
+    };
+  }).sort((a, b) => new Date(b.voided_at) - new Date(a.voided_at));
+}
+
+/**
+ * Merender tabel riwayat pembatalan F&B di panel Admin (Audit Void).
+ * Dipanggil saat section Audit Void aktif.
+ */
+function renderVoidAudit() {
+  const tbody = document.getElementById('voidAuditTable');
+  if (!tbody) return;
+  
+  const voidItems = getVoidItems();
+  
+  if (voidItems.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="text-center text-muted py-4">
+          <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+          Tidak ada riwayat pembatalan F&B
+        </td>
+      </tr>
+    `;
+    document.getElementById('voidAuditCount').textContent = '0';
+    document.getElementById('voidAuditTotal').textContent = 'Rp 0';
+    return;
+  }
+  
+  let totalLoss = 0;
+  
+  tbody.innerHTML = voidItems.map(item => {
+    const total = item.price * item.qty;
+    totalLoss += total;
+    
+    return `
+      <tr>
+        <td><span class="fw-semibold">${item.product_name}</span></td>
+        <td>${item.qty}</td>
+        <td>${utils.formatRupiah(item.price)}</td>
+        <td class="fw-bold text-danger">${utils.formatRupiah(total)}</td>
+        <td><span class="badge bg-light text-dark border">${item.console_name}</span></td>
+        <td><small>${item.voided_by_name}</small></td>
+        <td><small>${utils.formatDate(item.voided_at)}</small></td>
+      </tr>
+    `;
+  }).join('');
+  
+  document.getElementById('voidAuditCount').textContent = voidItems.length;
+  document.getElementById('voidAuditTotal').textContent = utils.formatRupiah(totalLoss);
 }
 
 // ============================================

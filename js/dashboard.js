@@ -1,13 +1,22 @@
 /**
  * GINOVA - Dashboard Operations
- * Timer, Billing, F&B, Payment
+ * Timer, Billing, F&B, Payment, Alarm, Void
+ * 
+ * FITUR:
+ * 1. Identitas Unit: Field "customer_name" pada setiap transaksi aktif
+ * 2. Sinkronisasi F&B: Crosscheck & tampilan item F&B per unit + modal manage
+ * 3. Logika Void: Status "void" pada item F&B yang dibatalkan, kembalikan stok
+ * 4. Sistem Alarm: Notifikasi visual & suara pada 5 menit dan 1 menit sebelum habis
+ * 5. Struk Detail: Tampilkan jumlah & nama item F&B di bill pembayaran
  */
 
-let timerIntervals = {};
+/**
+ * State untuk melacak alarm yang sudah dipicu per transaksi.
+ * Key: transactionId, Value: { last5min: timestamp|null, last1min: timestamp|null }
+ * @type {Map<string, Object>}
+ */
+let alarmState = new Map();
 
-// ============================================
-// INIT
-// ============================================
 document.addEventListener('DOMContentLoaded', () => {
   renderConsoles();
   renderActiveTransactions();
@@ -15,12 +24,13 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPackagesToSelect();
   loadProductsToSelect();
   
-  // Start global timer
+  /**
+   * Interval utama untuk update timer dan alarm setiap detik.
+   */
   setInterval(() => {
-    updateAllTimers();
+    updateTimer();
   }, 1000);
   
-  // Event listeners
   document.getElementById('btnStartBilling').addEventListener('click', startBilling);
   document.getElementById('btnAddFnB').addEventListener('click', addFnB);
   document.getElementById('btnCompletePayment').addEventListener('click', completePayment);
@@ -75,6 +85,124 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================
+// TIMER & ALARM ENTRY POINT
+// ============================================
+
+/**
+ * Entry point utama untuk update timer dan alarm.
+ * Dipanggil setiap detik oleh interval di DOMContentLoaded.
+ * Menggabungkan update visual timer dan pemeriksaan alarm.
+ */
+function updateTimer() {
+  updateAllTimers();
+  checkAlarms();
+}
+
+// ============================================
+// ALARM SYSTEM
+// ============================================
+
+/**
+ * Memeriksa dan memicu alarm untuk transaksi aktif.
+ * Alarm 5 menit berulang setiap 30 detik selama sisa waktu <= 5 menit.
+ * Alarm 1 menit berulang setiap 10 detik selama sisa waktu <= 1 menit.
+ * State alarm disimpan per transaksi dengan timestamp terakhir trigger.
+ */
+function checkAlarms() {
+  const transactions = getActiveTransactions();
+  const now = Date.now();
+  
+  transactions.forEach(tx => {
+    if (!tx.end_time) return;
+    const end = new Date(tx.end_time);
+    const remainingSeconds = Math.floor((end - new Date()) / 1000);
+    
+    // Ambil atau inisialisasi state alarm untuk transaksi ini
+    let state = alarmState.get(tx.id);
+    if (!state) {
+      state = { last5min: null, last1min: null };
+      alarmState.set(tx.id, state);
+    }
+    
+    // Reset state jika waktu sudah habis atau transaksi selesai
+    if (remainingSeconds <= 0) {
+      alarmState.delete(tx.id);
+      return;
+    }
+    
+    // Alarm 5 menit: berulang setiap 30 detik selama 0 < remaining <= 300
+    if (remainingSeconds <= 300 && remainingSeconds > 0) {
+      const sinceLast5min = state.last5min ? now - state.last5min : Infinity;
+      if (sinceLast5min >= 30000) { // 30 detik interval
+        triggerAlarm(tx, 5, 'menit');
+        state.last5min = now;
+      }
+    }
+    
+    // Alarm 1 menit: berulang setiap 10 detik selama 0 < remaining <= 60
+    if (remainingSeconds <= 60 && remainingSeconds > 0) {
+      const sinceLast1min = state.last1min ? now - state.last1min : Infinity;
+      if (sinceLast1min >= 10000) { // 10 detik interval
+        triggerAlarm(tx, 1, 'menit');
+        state.last1min = now;
+      }
+    }
+  });
+}
+
+function triggerAlarm(tx, minutes, unit) {
+  const console = db.getById(DB_KEYS.CONSOLES, tx.console_id);
+  const consoleName = console ? console.name : 'Unit';
+  const customerName = tx.customer_name || 'Pelanggan';
+  
+  const alarmContainer = document.getElementById('alarmContainer');
+  const alarmMessage = document.getElementById('alarmMessage');
+  
+  alarmMessage.innerHTML = `<strong>${consoleName}</strong> - ${customerName}<br>Sisa waktu: <strong>${minutes} ${unit}</strong>`;
+  alarmContainer.classList.remove('d-none');
+  
+  const consoleCard = document.getElementById(`console-${tx.console_id}`);
+  if (consoleCard) consoleCard.classList.add('alarm');
+  
+  const timerEl = document.getElementById(`timer-${tx.id}`);
+  if (timerEl) timerEl.classList.add('alarm');
+  
+  playAlarmSound();
+  console.log(`[ALARM] ${consoleName} - Sisa ${minutes} ${unit}`);
+}
+
+function playAlarmSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 800;
+      const startTime = ctx.currentTime + (i * 0.3);
+      const endTime = startTime + 0.15;
+      osc.start(startTime);
+      osc.stop(endTime);
+      gain.gain.setValueAtTime(0.3, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, endTime);
+    }
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) {
+    console.warn('Gagal memainkan suara alarm:', e);
+  }
+}
+
+function acknowledgeAlarm() {
+  document.getElementById('alarmContainer').classList.add('d-none');
+  document.querySelectorAll('.console-card.alarm').forEach(card => card.classList.remove('alarm'));
+  document.querySelectorAll('.timer-display.alarm').forEach(el => el.classList.remove('alarm'));
+}
+
+// ============================================
 // RENDER CONSOLES GRID
 // ============================================
 function renderConsoles() {
@@ -85,37 +213,45 @@ function renderConsoles() {
     const isBusy = console.status === 'busy';
     const activeTransaction = getActiveTransactionByConsole(console.id);
     
-    return `
-      <div class="col-lg-2 col-md-3 col-sm-4 col-6">
-        <div class="console-card ${console.status} p-3 h-100" id="console-${console.id}">
-          <span class="status-badge ${console.status}">
-            ${isBusy ? '<i class="bi bi-circle-fill me-1 small"></i>Terpakai' : '<i class="bi bi-circle-fill me-1 small"></i>Tersedia'}
-          </span>
-          <div class="mt-3">
-            <div class="d-flex align-items-center mb-2">
-              <i class="bi bi-controller fs-3 ${isBusy ? 'text-warning' : 'text-success'} me-2"></i>
-              <div>
-                <h6 class="mb-0 fw-bold">${console.name}</h6>
-                <small class="text-muted">${console.type}</small>
-              </div>
+    let fnbHtml = '';
+    if (isBusy && activeTransaction) {
+      const items = getTransactionItems(activeTransaction.id);
+      const activeItems = items.filter(item => item.status !== 'void');
+      if (activeItems.length > 0) {
+        fnbHtml = `<div class="fnb-mini-list mt-2">
+          ${activeItems.slice(0, 3).map(item => `<span class="fnb-item">${item.qty}x ${item.product_name}</span>`).join('')}
+          ${activeItems.length > 3 ? `<span class="fnb-item">+${activeItems.length - 3} lainnya</span>` : ''}
+        </div>`;
+      }
+    }
+    
+    let customerBadge = '';
+    if (isBusy && activeTransaction && activeTransaction.customer_name) {
+      customerBadge = `<div class="customer-name-badge mt-1"><i class="bi bi-person-fill me-1"></i>${activeTransaction.customer_name}</div>`;
+    }
+    
+    return `<div class="col-lg-2 col-md-3 col-sm-4 col-6">
+      <div class="console-card ${console.status} p-3 h-100" id="console-${console.id}">
+        <span class="status-badge ${console.status}">
+          ${isBusy ? '<i class="bi bi-circle-fill me-1 small"></i>Terpakai' : '<i class="bi bi-circle-fill me-1 small"></i>Tersedia'}
+        </span>
+        <div class="mt-2">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi bi-controller fs-3 ${isBusy ? 'text-warning' : 'text-success'} me-2"></i>
+            <div>
+              <h6 class="mb-0 fw-bold">${console.name}</h6>
+              <small class="text-muted">${console.type}</small>
             </div>
-            
-            ${isBusy && activeTransaction ? `
-              <div class="timer-display mb-2" id="timer-${activeTransaction.id}">
-                ${formatTimer(activeTransaction)}
-              </div>
-              <button class="btn btn-sm btn-outline-danger w-100" onclick="openPaymentModal('${activeTransaction.id}')">
-                <i class="bi bi-stop-circle me-1"></i>Selesai
-              </button>
-            ` : `
-              <button class="btn btn-sm btn-gn-primary w-100" onclick="openStartBillingModal('${console.id}')">
-                <i class="bi bi-play-fill me-1"></i>Mulai
-              </button>
-            `}
-          </div>
-        </div>
-      </div>
-    `;
+          ${customerBadge}
+          ${isBusy && activeTransaction ? `
+            <div class="timer-display mb-2" id="timer-${activeTransaction.id}">${formatTimer(activeTransaction)}</div>
+            ${fnbHtml}
+            <div class="d-grid gap-1 mt-2">
+              <button class="btn btn-sm btn-outline-success" onclick="openAddFnBModal('${activeTransaction.id}')"><i class="bi bi-plus-lg me-1"></i>F&B</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${activeTransaction.id}')"><i class="bi bi-stop-circle me-1"></i>Selesai</button>
+            </div>
+          ` : `<button class="btn btn-sm btn-gn-primary w-100 mt-2" onclick="openStartBillingModal('${console.id}')"><i class="bi bi-play-fill me-1"></i>Mulai</button>`}
+        </div>`;
   }).join('');
 }
 
@@ -127,14 +263,7 @@ function renderActiveTransactions() {
   const transactions = getActiveTransactions();
   
   if (transactions.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="7" class="text-center text-muted py-4">
-          <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-          Tidak ada transaksi aktif
-        </td>
-      </tr>
-    `;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-inbox fs-1 d-block mb-2"></i>Tidak ada transaksi aktif</td></tr>`;
     return;
   }
   
@@ -142,43 +271,34 @@ function renderActiveTransactions() {
     const console = db.getById(DB_KEYS.CONSOLES, tx.console_id);
     const pkg = db.getById(DB_KEYS.PACKAGES, tx.package_id);
     const items = getTransactionItems(tx.id);
-    const fnbTotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    const activeItems = items.filter(item => item.status !== 'void');
+    const fnbTotal = activeItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
     const currentTotal = calculateCurrentTotal(tx);
     
-    return `
-      <tr>
-        <td>
-          <span class="fw-semibold">${console ? console.name : '-'}</span>
-          <br><small class="text-muted">${console ? console.type : '-'}</small>
-        </td>
-        <td>
-          <span class="badge bg-light text-dark border">${pkg ? pkg.name : '-'}</span>
-        </td>
-        <td>
-          <small>${utils.formatTime(tx.start_time)}</small>
-        </td>
-        <td>
-          <span class="timer-display" id="table-timer-${tx.id}">${formatTimer(tx)}</span>
-        </td>
-        <td>
-          ${items.length > 0 ? `
-            <span class="badge bg-info">${items.length} item</span>
-            <br><small class="text-muted">${utils.formatRupiah(fnbTotal)}</small>
-          ` : '<span class="text-muted">-</span>'}
-        </td>
-        <td>
-          <span class="fw-bold text-success">${utils.formatRupiah(currentTotal)}</span>
-        </td>
-        <td class="text-center">
-          <button class="btn btn-sm btn-outline-success mb-1" onclick="openAddFnBModal('${tx.id}')">
-            <i class="bi bi-plus-lg"></i> F&B
-          </button>
-          <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${tx.id}')">
-            <i class="bi bi-stop-circle"></i> Selesai
-          </button>
-        </td>
-      </tr>
-    `;
+    let fnbDetailHtml = '';
+    if (activeItems.length > 0) {
+      fnbDetailHtml = activeItems.map(item => `<div class="small text-muted">${item.qty}x ${item.product_name}</div>`).join('');
+    }
+    
+    return `<tr>
+      <td>
+        <span class="fw-semibold">${console ? console.name : '-'}</span><br>
+        <small class="text-muted">${console ? console.type : '-'}</small>
+        ${tx.customer_name ? `<br><span class="badge bg-light text-dark border mt-1"><i class="bi bi-person-fill me-1"></i>${tx.customer_name}</span>` : ''}
+      </td>
+      <td><span class="badge bg-light text-dark border">${pkg ? pkg.name : '-'}</span></td>
+      <td><small>${utils.formatTime(tx.start_time)}</small></td>
+      <td><span class="timer-display" id="table-timer-${tx.id}">${formatTimer(tx)}</span></td>
+      <td>
+        ${activeItems.length > 0 ? `<span class="badge bg-info">${activeItems.length} item</span><div class="mt-1">${fnbDetailHtml}</div><br><small class="text-muted">${utils.formatRupiah(fnbTotal)}</small>` : '<span class="text-muted">-</span>'}
+      </td>
+      <td><span class="fw-bold text-success">${utils.formatRupiah(currentTotal)}</span></td>
+      <td class="text-center">
+        <button class="btn btn-sm btn-outline-success mb-1" onclick="openAddFnBModal('${tx.id}')"><i class="bi bi-plus-lg"></i> F&B</button>
+        <button class="btn btn-sm btn-outline-warning mb-1" onclick="openManageFnBModal('${tx.id}')"><i class="bi bi-list-ul"></i> Kelola</button>
+        <button class="btn btn-sm btn-outline-danger" onclick="openPaymentModal('${tx.id}')"><i class="bi bi-stop-circle"></i> Selesai</button>
+      </td>
+    </tr>`;
   }).join('');
 }
 
@@ -188,7 +308,6 @@ function renderActiveTransactions() {
 function formatTimer(transaction) {
   const start = new Date(transaction.start_time);
   const now = new Date();
-  const elapsed = Math.floor((now - start) / 1000); // seconds
   
   if (transaction.end_time) {
     const end = new Date(transaction.end_time);
@@ -197,7 +316,7 @@ function formatTimer(transaction) {
     return formatSeconds(remaining);
   }
   
-  // Reguler / open timer - count up
+  const elapsed = Math.floor((now - start) / 1000);
   return formatSeconds(elapsed);
 }
 
@@ -214,7 +333,6 @@ function updateAllTimers() {
     const timerEl = document.getElementById(`timer-${tx.id}`);
     const tableTimerEl = document.getElementById(`table-timer-${tx.id}`);
     const timeStr = formatTimer(tx);
-    
     if (timerEl) timerEl.textContent = timeStr;
     if (tableTimerEl) tableTimerEl.textContent = timeStr;
   });
@@ -227,11 +345,11 @@ function openStartBillingModal(consoleId) {
   const console = db.getById(DB_KEYS.CONSOLES, consoleId);
   if (!console) return;
   
-  // Reload packages to ensure dropdown is populated
   loadPackagesToSelect();
   
   document.getElementById('billingConsoleId').value = consoleId;
   document.getElementById('billingConsoleName').value = `${console.name} (${console.type})`;
+  document.getElementById('billingCustomerName').value = '';
   document.getElementById('billingPackage').value = '';
   document.getElementById('packageInfo').style.display = 'none';
   
@@ -242,7 +360,6 @@ function openStartBillingModal(consoleId) {
 function loadPackagesToSelect() {
   const select = document.getElementById('billingPackage');
   const packages = db.get(DB_KEYS.PACKAGES);
-  
   select.innerHTML = '<option value="">-- Pilih Paket --</option>' +
     packages.map(pkg => `<option value="${pkg.id}">${pkg.name} - ${utils.formatRupiah(pkg.price)}</option>`).join('');
 }
@@ -250,22 +367,25 @@ function loadPackagesToSelect() {
 function startBilling() {
   const consoleId = document.getElementById('billingConsoleId').value;
   const packageId = document.getElementById('billingPackage').value;
+  const customerName = document.getElementById('billingCustomerName').value.trim();
   
   if (!packageId) {
     alert('Silakan pilih paket terlebih dahulu!');
     return;
   }
   
-  const pkg = db.getById(DB_KEYS.PACKAGES, packageId);
-  const console = db.getById(DB_KEYS.CONSOLES, consoleId);
+  if (!customerName) {
+    alert('Silakan masukkan nama pelanggan!');
+    document.getElementById('billingCustomerName').focus();
+    return;
+  }
   
-  // Update console status
+  const pkg = db.getById(DB_KEYS.PACKAGES, packageId);
+  
   db.update(DB_KEYS.CONSOLES, consoleId, { status: 'busy' });
   
-  // Create transaction
   const startTime = new Date();
   let endTime = null;
-  
   if (pkg.duration > 0) {
     endTime = new Date(startTime.getTime() + pkg.duration * 60000).toISOString();
   }
@@ -274,6 +394,7 @@ function startBilling() {
     id: utils.generateId(),
     console_id: consoleId,
     package_id: packageId,
+    customer_name: customerName,
     start_time: startTime.toISOString(),
     end_time: endTime,
     base_price: pkg.price,
@@ -285,11 +406,7 @@ function startBilling() {
   };
   
   db.add(DB_KEYS.TRANSACTIONS, transaction);
-  
-  // Close modal
   bootstrap.Modal.getInstance(document.getElementById('startBillingModal')).hide();
-  
-  // Refresh UI
   renderConsoles();
   renderActiveTransactions();
   updateStats();
@@ -303,7 +420,7 @@ function openAddFnBModal(transactionId) {
   document.getElementById('fnbProduct').value = '';
   document.getElementById('fnbQty').value = 1;
   document.getElementById('fnbInfo').style.display = 'none';
-  
+  loadProductsToSelect();
   const modal = new bootstrap.Modal(document.getElementById('addFnBModal'));
   modal.show();
 }
@@ -311,7 +428,6 @@ function openAddFnBModal(transactionId) {
 function loadProductsToSelect() {
   const select = document.getElementById('fnbProduct');
   const products = db.get(DB_KEYS.PRODUCTS);
-  
   select.innerHTML = '<option value="">-- Pilih Produk --</option>' +
     products.map(prod => `<option value="${prod.id}">${prod.name} (${prod.stock} stok)</option>`).join('');
 }
@@ -334,7 +450,6 @@ function addFnB() {
     return;
   }
   
-  // Add transaction item
   const item = {
     id: utils.generateId(),
     transaction_id: transactionId,
@@ -342,165 +457,162 @@ function addFnB() {
     product_name: product.name,
     price: product.price,
     qty: qty,
+    status: 'active',
     created_at: new Date().toISOString()
   };
   
   db.add(DB_KEYS.TRANSACTION_ITEMS, item);
-  
-  // Update stock
   db.update(DB_KEYS.PRODUCTS, productId, { stock: product.stock - qty });
-  
-  // Close modal
   bootstrap.Modal.getInstance(document.getElementById('addFnBModal')).hide();
-  
-  // Refresh UI
+  renderConsoles();
   renderActiveTransactions();
   updateStats();
 }
 
 // ============================================
-// PAYMENT OPERATIONS - DUAL MODE (CASH & QRIS)
+// MANAGE F&B / VOID
+// ============================================
+function openManageFnBModal(transactionId) {
+  document.getElementById('manageFnBTransactionId').value = transactionId;
+  const items = getTransactionItems(transactionId);
+  const listContainer = document.getElementById('manageFnBList');
+  
+  if (items.length === 0) {
+    listContainer.innerHTML = '<p class="text-muted text-center py-3">Tidak ada item F&B</p>';
+  } else {
+    listContainer.innerHTML = items.map(item => {
+      const isVoid = item.status === 'void';
+      return `<div class="fnb-manage-item ${isVoid ? 'voided' : ''}">
+        <div>
+          <div class="fw-semibold ${isVoid ? 'text-decoration-line-through text-muted' : ''}">
+            ${item.product_name}${isVoid ? '<span class="badge-void">VOID</span>' : ''}
+          </div>
+          <small class="text-muted">${item.qty} x ${utils.formatRupiah(item.price)} = ${utils.formatRupiah(item.qty * item.price)}</small>
+          ${isVoid ? `<br><small class="text-danger">Dibatalkan: ${utils.formatDate(item.voided_at)}</small>` : ''}
+        </div>
+        ${!isVoid ? `<button class="btn btn-sm btn-outline-danger" onclick="voidFnBItem('${item.id}')"><i class="bi bi-x-lg"></i> Batal</button>` : '<span class="badge bg-secondary">Dibatalkan</span>'}
+      </div>`;
+    }).join('');
+  }
+  
+  const modal = new bootstrap.Modal(document.getElementById('manageFnBModal'));
+  modal.show();
+}
+
+function voidFnBItem(itemId) {
+  if (!confirm('Yakin ingin membatalkan item ini? Stok akan dikembalikan.')) return;
+  
+  const items = db.get(DB_KEYS.TRANSACTION_ITEMS);
+  const itemIndex = items.findIndex(i => i.id === itemId);
+  if (itemIndex === -1) {
+    alert('Item tidak ditemukan!');
+    return;
+  }
+  
+  const item = items[itemIndex];
+  if (item.status === 'void') {
+    alert('Item sudah dibatalkan sebelumnya!');
+    return;
+  }
+  
+  const product = db.getById(DB_KEYS.PRODUCTS, item.product_id);
+  if (product) {
+    db.update(DB_KEYS.PRODUCTS, item.product_id, { stock: product.stock + item.qty });
+  }
+  
+  items[itemIndex] = {
+    ...item,
+    status: 'void',
+    voided_at: new Date().toISOString(),
+    voided_by: Auth.getCurrentUser()?.id || 'unknown'
+  };
+  
+  db.set(DB_KEYS.TRANSACTION_ITEMS, items);
+  
+  const txId = document.getElementById('manageFnBTransactionId').value;
+  openManageFnBModal(txId);
+  renderConsoles();
+  renderActiveTransactions();
+  updateStats();
+  
+  console.log(`[VOID] Item ${item.product_name} dibatalkan oleh ${Auth.getCurrentUser()?.name || 'unknown'}`);
+}
+
+// ============================================
+// PAYMENT OPERATIONS
 // ============================================
 let currentPaymentTransactionId = null;
-let currentPaymentMethod = 'cash'; // default: cash
+let currentPaymentMethod = 'cash';
 let currentPaymentTotal = 0;
 
-/**
- * Fungsi untuk memilih metode pembayaran
- * @param {string} method - 'cash' atau 'qris'
- */
 function selectPaymentMethod(method) {
   currentPaymentMethod = method;
-  
   const btnPayCash = document.getElementById('btnPayCash');
   const btnPayQRIS = document.getElementById('btnPayQRIS');
   const cashForm = document.getElementById('cashPaymentForm');
   const qrisForm = document.getElementById('qrisPaymentForm');
   
   if (method === 'cash') {
-    // Aktifkan tombol Cash, nonaktifkan QRIS
-    btnPayCash.classList.add('active');
+    btnPayCash.classList.add('active', 'btn-success');
     btnPayCash.classList.remove('btn-outline-success');
-    btnPayCash.classList.add('btn-success');
-    
-    btnPayQRIS.classList.remove('active');
-    btnPayQRIS.classList.remove('btn-primary');
+    btnPayQRIS.classList.remove('active', 'btn-primary');
     btnPayQRIS.classList.add('btn-outline-primary');
-    
-    // Tampilkan form Cash, sembunyikan QRIS
     cashForm.style.display = 'block';
     qrisForm.style.display = 'none';
   } else {
-    // Aktifkan tombol QRIS, nonaktifkan Cash
-    btnPayQRIS.classList.add('active');
+    btnPayQRIS.classList.add('active', 'btn-primary');
     btnPayQRIS.classList.remove('btn-outline-primary');
-    btnPayQRIS.classList.add('btn-primary');
-    
-    btnPayCash.classList.remove('active');
-    btnPayCash.classList.remove('btn-success');
+    btnPayCash.classList.remove('active', 'btn-success');
     btnPayCash.classList.add('btn-outline-success');
-    
-    // Tampilkan form QRIS, sembunyikan Cash
     cashForm.style.display = 'none';
     qrisForm.style.display = 'block';
-    
-    // Isi total di form QRIS
     const qrisTotalEl = document.getElementById('qrisPaymentTotal');
-    if (qrisTotalEl) {
-      qrisTotalEl.value = utils.formatRupiah(currentPaymentTotal);
-    }
+    if (qrisTotalEl) qrisTotalEl.value = utils.formatRupiah(currentPaymentTotal);
   }
 }
 
-/**
- * Fungsi untuk menampilkan modal QRIS dengan QR Code
- * Dipanggil saat user klik "Tampilkan QRIS"
- */
 function displayQRCode() {
   try {
-    // Tutup modal pembayaran utama
-    const paymentModalEl = document.getElementById('paymentModal');
-    const paymentModal = bootstrap.Modal.getOrCreateInstance(paymentModalEl);
+    const paymentModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('paymentModal'));
     paymentModal.hide();
     
-    // Isi jumlah pembayaran di modal QRIS
     const qrisAmountEl = document.getElementById('qrisAmount');
-    if (qrisAmountEl) {
-      qrisAmountEl.textContent = utils.formatRupiah(currentPaymentTotal);
-    }
+    if (qrisAmountEl) qrisAmountEl.textContent = utils.formatRupiah(currentPaymentTotal);
     
-    // Reset status pembayaran
     const statusEl = document.getElementById('qrisPaymentStatus');
     if (statusEl) {
-      statusEl.innerHTML = `
-        <div class="spinner-border text-primary me-2" role="status">
-          <span class="visually-hidden">Loading...</span>
-        </div>
-        <span class="text-muted">Menunggu pembayaran...</span>
-      `;
+      statusEl.innerHTML = `<div class="spinner-border text-primary me-2" role="status"><span class="visually-hidden">Loading...</span></div><span class="text-muted">Menunggu pembayaran...</span>`;
     }
     
-    // Tampilkan modal QRIS
-    const qrisModalEl = document.getElementById('qrisModal');
-    const qrisModal = bootstrap.Modal.getOrCreateInstance(qrisModalEl);
+    const qrisModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('qrisModal'));
     qrisModal.show();
-    
-    // Simulasi polling untuk cek status pembayaran (webhook simulation)
-    startQRISSimulation();
-    
   } catch (error) {
     console.error('Error displaying QRIS:', error);
-    alert('Terjadi kesalahan saat menampilkan QRIS. Silakan coba lagi.');
+    alert('Terjadi kesalahan saat menampilkan QRIS.');
   }
 }
 
-/**
- * Fungsi untuk menutup modal QRIS
- */
 function closeQRISModal() {
-  const qrisModalEl = document.getElementById('qrisModal');
-  const qrisModal = bootstrap.Modal.getOrCreateInstance(qrisModalEl);
+  const qrisModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('qrisModal'));
   qrisModal.hide();
-  
-  // Buka kembali modal pembayaran
   setTimeout(() => {
-    const paymentModalEl = document.getElementById('paymentModal');
-    const paymentModal = bootstrap.Modal.getOrCreateInstance(paymentModalEl);
+    const paymentModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('paymentModal'));
     paymentModal.show();
   }, 300);
 }
 
-/**
- * Fungsi untuk mensimulasikan pembayaran QRIS berhasil
- * Dipanggil saat user klik tombol simulasi atau saat webhook diterima
- */
 function simulateQRISSuccess() {
   try {
-    // Update status pembayaran di UI
     const statusEl = document.getElementById('qrisPaymentStatus');
     if (statusEl) {
-      statusEl.innerHTML = `
-        <div class="alert alert-success">
-          <i class="bi bi-check-circle-fill me-2"></i>
-          <strong>Pembayaran berhasil!</strong><br>
-          <small>Transaksi telah dikonfirmasi oleh DANA.</small>
-        </div>
-      `;
+      statusEl.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i><strong>Pembayaran berhasil!</strong></div>`;
     }
-    
-    // Proses pembayaran
-    setTimeout(() => {
-      processQrisPayment();
-    }, 1500);
-    
+    setTimeout(() => processQrisPayment(), 1500);
   } catch (error) {
     console.error('Error simulating QRIS success:', error);
   }
 }
 
-/**
- * Fungsi untuk memproses pembayaran QRIS setelah konfirmasi
- */
 function processQrisPayment() {
   if (!currentPaymentTransactionId) {
     alert('Tidak ada transaksi yang dipilih!');
@@ -516,7 +628,6 @@ function processQrisPayment() {
     
     const total = calculateCurrentTotal(tx);
     
-    // Update transaction dengan metode QRIS
     db.update(DB_KEYS.TRANSACTIONS, currentPaymentTransactionId, {
       total_price: total,
       status: 'paid',
@@ -526,85 +637,41 @@ function processQrisPayment() {
       change: 0
     });
     
-    // Update console status
     db.update(DB_KEYS.CONSOLES, tx.console_id, { status: 'available' });
     
-    // Tutup modal QRIS
-    const qrisModalEl = document.getElementById('qrisModal');
-    const qrisModal = bootstrap.Modal.getOrCreateInstance(qrisModalEl);
+    const qrisModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('qrisModal'));
     qrisModal.hide();
     
-    // Reset current transaction
     currentPaymentTransactionId = null;
-    
-    // Refresh UI
     renderConsoles();
     renderActiveTransactions();
     updateStats();
     
-    // Tampilkan notifikasi sukses
     setTimeout(() => {
       showSuccessNotification();
-      
-      // Trigger auto-transfer (simulasi backend)
       simulateAutoTransfer(total);
     }, 300);
-    
   } catch (error) {
     console.error('Error processing QRIS payment:', error);
-    alert('Terjadi kesalahan saat memproses pembayaran QRIS. Silakan coba lagi.');
+    alert('Terjadi kesalahan saat memproses pembayaran QRIS.');
   }
 }
 
-/**
- * Fungsi untuk menampilkan notifikasi pembayaran berhasil
- */
 function showSuccessNotification() {
-  const successModalEl = document.getElementById('successModal');
-  const successModal = bootstrap.Modal.getOrCreateInstance(successModalEl);
+  const successModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('successModal'));
   successModal.show();
 }
 
-/**
- * Fungsi untuk menutup modal sukses
- */
 function closeSuccessModal() {
-  const successModalEl = document.getElementById('successModal');
-  const successModal = bootstrap.Modal.getOrCreateInstance(successModalEl);
+  const successModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('successModal'));
   successModal.hide();
 }
 
-/**
- * Fungsi untuk mensimulasikan auto-transfer ke rekening bank
- * Ini adalah simulasi logika backend yang biasanya berjalan di server
- * @param {number} amount - Jumlah yang akan ditransfer
- */
 function simulateAutoTransfer(amount) {
   console.log('=== AUTO-TRANSFER SIMULATION ===');
   console.log('Waktu:', new Date().toISOString());
   console.log('Jumlah:', utils.formatRupiah(amount));
-  console.log('Status: Memproses disbursement ke rekening bank terdaftar...');
-  
-  // Simulasi delay proses transfer
-  setTimeout(() => {
-    console.log('Status: Transfer berhasil! Saldo telah diteruskan ke rekening bank.');
-    console.log('================================');
-  }, 2000);
-}
-
-/**
- * Fungsi untuk memulai simulasi polling QRIS
- * Dalam implementasi nyata, ini akan diganti dengan webhook listener
- */
-function startQRISSimulation() {
-  // Dalam implementasi nyata, polling ini digantikan oleh:
-  // 1. Webhook dari DANA yang mengirim notifikasi pembayaran
-  // 2. Atau polling ke API DANA untuk cek status transaksi
-  
-  console.log('QRIS Polling started for transaction:', currentPaymentTransactionId);
-  
-  // Simulasi: setelah 30 detik, jika tidak ada pembayaran, tutup modal
-  // (Dalam demo, user bisa klik tombol simulasi)
+  console.log('================================');
 }
 
 function openPaymentModal(transactionId) {
@@ -618,37 +685,66 @@ function openPaymentModal(transactionId) {
     
     const console = db.getById(DB_KEYS.CONSOLES, tx.console_id);
     const pkg = db.getById(DB_KEYS.PACKAGES, tx.package_id);
-    const items = getTransactionItems(transactionId);
+    
+    // Ambil SEMUA item (termasuk void) untuk audit
+    const allItems = getTransactionItems(transactionId);
+    const activeItems = allItems.filter(item => item.status !== 'void');
+    const voidItems = allItems.filter(item => item.status === 'void');
     
     const total = calculateCurrentTotal(tx);
-    currentPaymentTotal = total; // Simpan untuk QRIS
+    currentPaymentTotal = total;
     
-    const fnbTotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    const fnbTotal = activeItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
     
     // Fill receipt preview
-    const receiptDateEl = document.getElementById('receiptDate');
-    if (receiptDateEl) receiptDateEl.textContent = utils.formatDate(new Date());
+    if (document.getElementById('receiptDate')) document.getElementById('receiptDate').textContent = utils.formatDate(new Date());
+    if (document.getElementById('receiptConsole')) document.getElementById('receiptConsole').textContent = console ? console.name : '-';
+    if (document.getElementById('receiptPackage')) document.getElementById('receiptPackage').textContent = pkg ? pkg.name : '-';
+    if (document.getElementById('receiptStart')) document.getElementById('receiptStart').textContent = utils.formatDate(tx.start_time);
+    if (document.getElementById('receiptDuration')) document.getElementById('receiptDuration').textContent = calculateDuration(tx);
+    if (document.getElementById('receiptBasePrice')) document.getElementById('receiptBasePrice').textContent = utils.formatRupiah(tx.base_price);
     
-    const receiptConsoleEl = document.getElementById('receiptConsole');
-    if (receiptConsoleEl) receiptConsoleEl.textContent = console ? console.name : '-';
-    
-    const receiptPackageEl = document.getElementById('receiptPackage');
-    if (receiptPackageEl) receiptPackageEl.textContent = pkg ? pkg.name : '-';
-    
-    const receiptStartEl = document.getElementById('receiptStart');
-    if (receiptStartEl) receiptStartEl.textContent = utils.formatDate(tx.start_time);
-    
-    const receiptDurationEl = document.getElementById('receiptDuration');
-    if (receiptDurationEl) receiptDurationEl.textContent = calculateDuration(tx);
-    
-    const receiptBasePriceEl = document.getElementById('receiptBasePrice');
-    if (receiptBasePriceEl) receiptBasePriceEl.textContent = utils.formatRupiah(tx.base_price);
-    
+    // Tampilkan F&B total dengan badge jumlah item
     const receiptFnBEl = document.getElementById('receiptFnB');
-    if (receiptFnBEl) receiptFnBEl.textContent = utils.formatRupiah(fnbTotal);
+    if (receiptFnBEl) {
+      if (activeItems.length > 0) {
+        receiptFnBEl.innerHTML = `${utils.formatRupiah(fnbTotal)}<span class="badge bg-info ms-1">${activeItems.length} item</span>`;
+      } else {
+        receiptFnBEl.textContent = utils.formatRupiah(fnbTotal);
+      }
+    }
     
-    const receiptTotalEl = document.getElementById('receiptTotal');
-    if (receiptTotalEl) receiptTotalEl.textContent = utils.formatRupiah(total);
+    // FITUR #5: Tampilkan detail item F&B di struk pembayaran
+    const receiptItemsEl = document.getElementById('receiptItems');
+    if (receiptItemsEl) {
+      let itemsHtml = '';
+      
+      // Item aktif dengan nama dan jumlah
+      if (activeItems.length > 0) {
+        itemsHtml += `<div class="mt-2 mb-2"><small class="fw-semibold text-muted">Detail F&B:</small></div>`;
+        activeItems.forEach(item => {
+          itemsHtml += `<div class="receipt-line" style="font-size:0.85rem;">
+            <span>&nbsp;&nbsp;${item.qty}x ${item.product_name}</span>
+            <span>${utils.formatRupiah(item.price * item.qty)}</span>
+          </div>`;
+        });
+      }
+      
+      // Item yang di-void (untuk audit trail)
+      if (voidItems.length > 0) {
+        itemsHtml += `<div class="mt-2 mb-1"><small class="fw-semibold text-danger">Dibatalkan:</small></div>`;
+        voidItems.forEach(item => {
+          itemsHtml += `<div class="receipt-line receipt-item-void">
+            <span>&nbsp;&nbsp;${item.qty}x ${item.product_name}</span>
+            <span>${utils.formatRupiah(item.price * item.qty)}</span>
+          </div>`;
+        });
+      }
+      
+      receiptItemsEl.innerHTML = itemsHtml;
+    }
+    
+    if (document.getElementById('receiptTotal')) document.getElementById('receiptTotal').textContent = utils.formatRupiah(total);
     
     // Fill payment form
     const paymentTotalEl = document.getElementById('paymentTotal');
@@ -657,11 +753,8 @@ function openPaymentModal(transactionId) {
       paymentTotalEl.dataset.raw = total;
     }
     
-    // Isi total di form QRIS juga
     const qrisPaymentTotalEl = document.getElementById('qrisPaymentTotal');
-    if (qrisPaymentTotalEl) {
-      qrisPaymentTotalEl.value = utils.formatRupiah(total);
-    }
+    if (qrisPaymentTotalEl) qrisPaymentTotalEl.value = utils.formatRupiah(total);
     
     const paymentCashEl = document.getElementById('paymentCash');
     if (paymentCashEl) paymentCashEl.value = '';
@@ -672,8 +765,7 @@ function openPaymentModal(transactionId) {
     // Reset ke metode cash sebagai default
     selectPaymentMethod('cash');
     
-    const modalEl = document.getElementById('paymentModal');
-    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('paymentModal'));
     modal.show();
   } catch (error) {
     console.error('Error opening payment modal:', error);
@@ -696,7 +788,6 @@ function completePayment() {
     
     const total = calculateCurrentTotal(tx);
     
-    // Jika metode cash, validasi uang diterima
     if (currentPaymentMethod === 'cash') {
       const cash = parseInt(document.getElementById('paymentCash').value) || 0;
       
@@ -705,7 +796,6 @@ function completePayment() {
         return;
       }
       
-      // Update transaction dengan metode cash
       db.update(DB_KEYS.TRANSACTIONS, currentPaymentTransactionId, {
         total_price: total,
         status: 'paid',
@@ -715,28 +805,20 @@ function completePayment() {
         change: cash - total
       });
     } else {
-      // Untuk QRIS, proses berbeda (sudah dihandle di processQrisPayment)
       alert('Silakan gunakan tombol "Tampilkan QRIS" untuk pembayaran QRIS.');
       return;
     }
     
-    // Update console status
     db.update(DB_KEYS.CONSOLES, tx.console_id, { status: 'available' });
     
-    // Close modal
-    const modalEl = document.getElementById('paymentModal');
-    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('paymentModal'));
     modal.hide();
     
-    // Reset current transaction
     currentPaymentTransactionId = null;
-    
-    // Refresh UI
     renderConsoles();
     renderActiveTransactions();
     updateStats();
     
-    // Show print option
     setTimeout(() => {
       if (confirm('Cetak nota?')) {
         printReceipt();
@@ -773,11 +855,11 @@ function getTransactionItems(transactionId) {
 function calculateCurrentTotal(transaction) {
   const pkg = db.getById(DB_KEYS.PACKAGES, transaction.package_id);
   const items = getTransactionItems(transaction.id);
-  const fnbTotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  const activeItems = items.filter(item => item.status !== 'void');
+  const fnbTotal = activeItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
   
   let baseTotal = transaction.base_price;
   
-  // If reguler package, calculate based on elapsed time
   if (pkg && pkg.is_reguler) {
     const start = new Date(transaction.start_time);
     const now = new Date();
@@ -788,37 +870,33 @@ function calculateCurrentTotal(transaction) {
   return baseTotal + fnbTotal;
 }
 
+/**
+ * Menghitung durasi bermain dari transaksi dalam format string yang human-readable.
+ * Untuk paket berdurasi: hitung dari start_time sampai sekarang (atau end_time jika sudah lewat).
+ * Untuk reguler: hitung dari start_time sampai sekarang (atau paid_at jika sudah dibayar).
+ * @param {Object} transaction - Objek transaksi
+ * @returns {string} Durasi dalam format "X jam Y menit" atau "Y menit"
+ */
 function calculateDuration(transaction) {
   const start = new Date(transaction.start_time);
   const now = new Date();
-  const diff = Math.floor((now - start) / (1000 * 60)); // minutes
-  const h = Math.floor(diff / 60);
-  const m = diff % 60;
-  return `${h}j ${m}m`;
+  
+  // Gunakan waktu selesai aktual jika sudah dibayar, atau end_time jika paket habis
+  let end = now;
+  if (transaction.paid_at) {
+    end = new Date(transaction.paid_at);
+  } else if (transaction.end_time && new Date(transaction.end_time) < now) {
+    end = new Date(transaction.end_time);
+  }
+  
+  const diffMs = end - start;
+  if (diffMs < 0) return '0 menit';
+  
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const h = Math.floor(diffMinutes / 60);
+  const m = diffMinutes % 60;
+  
+  if (h > 0 && m > 0) return `${h} jam ${m} menit`;
+  if (h > 0) return `${h} jam`;
+  return `${m} menit`;
 }
-
-function updateStats() {
-  const consoles = db.get(DB_KEYS.CONSOLES);
-  const transactions = getActiveTransactions();
-  const products = db.get(DB_KEYS.PRODUCTS);
-  
-  const available = consoles.filter(c => c.status === 'available').length;
-  const busy = consoles.filter(c => c.status === 'busy').length;
-  const lowStock = products.filter(p => p.stock <= 10).length;
-  
-  // Calculate today's revenue
-  const today = utils.getToday();
-  const todayTransactions = db.get(DB_KEYS.TRANSACTIONS).filter(tx => {
-    if (!tx.paid_at) return false;
-    return tx.paid_at.split('T')[0] === today;
-  });
-  const todayRevenue = todayTransactions.reduce((sum, tx) => sum + (tx.total_price || 0), 0);
-  
-  document.getElementById('statTotalConsoles').textContent = consoles.length;
-  document.getElementById('statActiveSessions').textContent = transactions.length;
-  document.getElementById('statAvailableCount').textContent = available;
-  document.getElementById('statTodayRevenue').textContent = utils.formatRupiah(todayRevenue);
-}
-
-
-

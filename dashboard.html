@@ -18,6 +18,20 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <!-- ALARM NOTIFICATION CONTAINER -->
+  <div id="alarmContainer" class="alarm-container d-none">
+    <div class="alarm-box">
+      <i class="bi bi-alarm-fill alarm-icon"></i>
+      <div class="flex-grow-1">
+        <h6 class="alarm-title fw-bold mb-1">Waktu Hampir Habis!</h6>
+        <p class="alarm-message mb-0" id="alarmMessage" style="font-size:0.9rem;">-</p>
+      </div>
+      <button class="btn btn-light btn-sm fw-semibold" onclick="acknowledgeAlarm()">
+        <i class="bi bi-check-lg"></i> OK
+      </button>
+    </div>
+  </div>
+
   <!-- Navbar -->
   <nav class="navbar navbar-expand-lg navbar-ginova sticky-top">
     <div class="container-fluid px-4">
@@ -170,6 +184,10 @@
               <input type="text" class="form-control form-control-gn" id="billingConsoleName" readonly>
             </div>
             <div class="mb-3">
+              <label class="form-label fw-semibold">Nama Pengguna <span class="text-muted">(Pelanggan)</span></label>
+              <input type="text" class="form-control form-control-gn" id="billingCustomerName" placeholder="Masukkan nama pelanggan" required>
+            </div>
+            <div class="mb-3">
               <label class="form-label fw-semibold">Pilih Paket</label>
               <select class="form-select form-control-gn" id="billingPackage" required>
                 <option value="">-- Pilih Paket --</option>
@@ -229,6 +247,35 @@
           <button type="button" class="btn btn-gn-primary" id="btnAddFnB">
             <i class="bi bi-plus-lg me-1"></i>Tambah
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Manage F&B (Void Items) -->
+  <div class="modal fade modal-gn" id="manageFnBModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold">
+            <i class="bi bi-cup-straw me-2 text-success"></i>Kelola Pesanan F&amp;B
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="manageFnBTransactionId">
+          <div id="manageFnBList">
+            <p class="text-muted text-center py-3">Tidak ada item F&amp;B</p>
+          </div>
+          <div class="alert alert-light border mt-3">
+            <small class="text-muted">
+              <i class="bi bi-info-circle me-1"></i>
+              Item yang di-void akan dikembalikan ke stok dan tidak dihitung dalam total pembayaran.
+            </small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
         </div>
       </div>
     </div>
