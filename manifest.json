@@ -1,0 +1,23 @@
+{
+  "name": "GiNova Rental PS Management System",
+  "short_name": "GiNova PS",
+  "description": "Sistem Manajemen Rental PlayStation Premium - Billing, F&B, Laporan, dan Pembayaran QRIS.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#198754",
+  "theme_color": "#146c43",
+  "orientation": "any",
+  "scope": "./",
+  "icons": [
+    {
+      "src": "img/ginova-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "lang": "id",
+  "dir": "ltr"
+}
+
